@@ -14,18 +14,24 @@ load_dotenv()
 # --- Zoom Configuration ---
 ZOOM_CLIENT_ID = os.environ.get("ZOOM_CLIENT_ID")
 ZOOM_CLIENT_SECRET = os.environ.get("ZOOM_CLIENT_SECRET")
-ZOOM_REDIRECT_URI = os.environ.get("ZOOM_REDIRECT_URI") # e.g., "http://localhost:8000/callback"
+# ZOOM_REDIRECT_URI = os.environ.get("ZOOM_REDIRECT_URI", "https://vital-bluegill-deadly.ngrok-free.app/callback")
+ZOOM_REDIRECT_URI = "https://vital-bluegill-deadly.ngrok-free.app/callback"
 ZOOM_AUTHORIZATION_URL = "https://zoom.us/oauth/authorize"
 ZOOM_TOKEN_URL = "https://zoom.us/oauth/token"
 ZOOM_USER_INFO_URL = "https://api.zoom.us/v2/users/me"
 ZOOM_CREATE_MEETING_URL = "https://api.zoom.us/v2/users/me/meetings" # API endpoint for creating meetings
+ZOOM_WEBHOOK_SECRET_TOKEN = os.environ.get("ZOOM_WEBHOOK_SECRET_TOKEN")
+ZOOM_WEBHOOK_VERIFICATION_TOKEN = os.environ.get("ZOOM_WEBHOOK_VERIFICATION_TOKEN")
+ZOOM_POLL_CREATE_URL = "https://api.zoom.us/v2/meetings/" # API endpoint for creating polls
+ZOOM_POLL_REPORT_URL="https://api.zoom.us/v2/report/meetings/"
+
+print(f"ZOOM_REDIRECT_URI = {ZOOM_REDIRECT_URI}")
 
 # --- FastAPI Setup ---
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 # --- Helper Functions ---
-
 async def get_zoom_user_info(access_token: str):
     """Fetches user information from Zoom API."""
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -40,6 +46,58 @@ async def get_zoom_user_info(access_token: str):
         except httpx.RequestError as e:
             print(f"Request error fetching user info: {e}")
             return None
+
+async def get_poll_results(access_token: str, meeting_id: str):
+    """Fetches user information from Zoom API."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    body = {
+        "title": "Class Engagement Quiz - Lecture 1",
+            "anonymous": "false",
+            "questions": [
+                {
+                "name": "Which topic was covered today?",
+                "type": "single",  # single | multiple | matching
+                "answers": ["LLMs", "CNNs", "GANs", "RNNs"]
+                },
+                {
+                "name": "Rate your understanding",
+                "type": "rating",
+                "answer_min_character": "Poor",
+                "answer_max_character": "Excellent"
+                }
+            ]
+        }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            url = ZOOM_POLL_CREATE_URL + meeting_id + "/polls"
+            response = await client.post(url, headers=headers, json=body)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            print(f"Error fetching user info: {e.response.text}") # Log error details
+            return None
+        except httpx.RequestError as e:
+            print(f"Request error fetching user info: {e}")
+            return None
+
+
+async def get_poll_info(access_token: str, meeting_id: str):
+    """Fetches user information from Zoom API."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient() as client:
+        try:
+            url = ZOOM_POLL_REPORT_URL + meeting_id + "/polls"
+            response = await client.get(ZOOM_USER_INFO_URL, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            print(f"Error fetching user info: {e.response.text}") # Log error details
+            return None
+        except httpx.RequestError as e:
+            print(f"Request error fetching user info: {e}")
+            return None
+
 
 async def create_zoom_meeting(access_token: str, topic: str, start_time_str: str, duration_min: int):
     """Creates a new meeting using the Zoom API."""
@@ -153,14 +211,8 @@ async def zoom_callback(code: str, request: Request):
             if not user_info:
                 # Even if user info fails, we might still proceed if token is valid
                  print("Warning: Failed to retrieve user info, but proceeding with access token.")
-                 # You could choose to raise an error here if user_info is strictly required
-                 # raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve user info from Zoom.")
                  user_info = {"display_name": "Unknown User"} # Provide default
 
-            # --- IMPORTANT: Pass the access_token to the template ---
-            # Security Note: Passing tokens to the client-side (even in hidden fields)
-            # increases exposure risk (e.g., XSS). For production, server-side
-            # sessions are strongly recommended to store the token securely.
             return templates.TemplateResponse("success.html", {
                 "request": request,
                 "user_info": user_info,
@@ -178,6 +230,7 @@ async def zoom_callback(code: str, request: Request):
         except httpx.RequestError as e:
             print(f"Request error during token exchange: {e}")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Token Exchange Request Failed: {e}")
+
 
 @app.post("/create_meeting", response_class=HTMLResponse)
 async def handle_create_meeting(
@@ -216,3 +269,50 @@ async def handle_create_meeting(
         # Catch any other unexpected errors
         print(f"Unexpected error creating meeting: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An internal error occurred: {e}")
+
+
+@app.post("/webhook")
+async def zoom_webhook(request: Request):
+    """
+    Handles Zoom webhooks for meeting.started and meeting.participant_joined events.
+    """
+    if not ZOOM_WEBHOOK_VERIFICATION_TOKEN:
+        raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_VERIFICATION_TOKEN not configured")
+
+    if not ZOOM_WEBHOOK_SECRET_TOKEN:
+        raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_SECRET_TOKEN not configured")
+
+    try:
+        data = await request.json()
+        print(f"Received webhook data: {data}")
+        event_type = data.get("event")
+        print(f"Event Type: {event_type}")
+        if event_type == "meeting.started":
+            meeting_id = data["payload"]["object"]["id"]
+            topic = data["payload"]["object"]["topic"]
+            start_time = data["payload"]["object"]["start_time"]
+            print(f"Meeting Started: ID={meeting_id}, Topic='{topic}', Start Time={start_time}")
+
+        elif event_type == "meeting.participant_joined":
+            participant_name = data["payload"]["object"]["participant"]["user_name"]
+            meeting_id = data["payload"]["object"]["id"]
+            print(f"Participant Joined: Name={participant_name}, Meeting ID={meeting_id}")
+
+        elif data.get("event") == "app.installed":
+            account_id = data["payload"]["account_id"]
+            print(f"App installed in account {account_id}")
+            return {"plainToken": ZOOM_WEBHOOK_VERIFICATION_TOKEN}
+
+        elif data.get("event") == "app.uninstalled":
+            account_id = data["payload"]["account_id"]
+            print(f"App uninstalled from account {account_id}")
+
+        else:
+            print(f"Received unknown event: {event_type}")
+            print(f"Webhook Data: {data}")
+
+        return {"status": "success"}
+
+    except Exception as e:
+        print(f"Error processing webhook: {e}")
+        raise HTTPException(status_code=500, detail="Error processing webhook")

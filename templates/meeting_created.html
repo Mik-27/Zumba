@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Zoom Meeting Created</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        .meeting-details {
+            background-color: #e0ffe0;
+            padding: 15px;
+            border: 1px solid #b0d0b0;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        a {
+            color: #007bff;
+        }
+
+        code {
+            background-color: #f0f0f0;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Meeting Created Successfully!</h1>
+
+    <div class="meeting-details">
+        <h2>Meeting Details:</h2>
+        {% if meeting %}
+        <p><strong>Topic:</strong> {{ meeting.get('topic', 'N/A') }}</p>
+        <p><strong>Meeting ID:</strong> <code>{{ meeting.get('id', 'N/A') }}</code></p>
+        <p><strong>Start Time (UTC):</strong> {{ meeting.get('start_time', 'N/A') }}</p>
+        <p><strong>Duration:</strong> {{ meeting.get('duration', 'N/A') }} minutes</p>
+        <p><strong>Join URL:</strong> <a href="{{ meeting.get('join_url', '#') }}" target="_blank">{{
+                meeting.get('join_url', 'N/A') }}</a></p>
+        <p><strong>Host Start URL:</strong> <a href="{{ meeting.get('start_url', '#') }}" target="_blank">Start Meeting
+                (Host)</a></p>
+        <!-- Display other relevant details -->
+        {% else %}
+        <p>Error: Meeting details not available.</p>
+        {% endif %}
+    </div>
+
+    <p><a href="/">Go Back Home</a></p>
+
+</body>
+
+</html>

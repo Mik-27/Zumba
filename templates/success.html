@@ -2,17 +2,106 @@
 <html>
 
 <head>
-    <title>Login Successful!</title>
+    <title>Zoom Login Success</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        label {
+            display: block;
+            margin-top: 10px;
+        }
+
+        input[type=text],
+        input[type=number],
+        input[type=datetime-local] {
+            width: 300px;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .user-info {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 
 <body>
-    <h1>Login Successful!</h1>
-    <p>User Information:</p>
-    <ul>
-        <li>Email: {{ user_info.email }}</li>
-        <li>First Name: {{ user_info.first_name }}</li>
-        <li>Last Name: {{ user_info.last_name }}</li>
-    </ul>
+    <h1>Authentication Successful!</h1>
+
+    <div class="user-info">
+        <h2>User Information:</h2>
+        {% if user_info %}
+        <p><strong>Email:</strong> {{ user_info.get('email', 'N/A') }}</p>
+        <p><strong>Name:</strong> {{ user_info.get('first_name', '') }} {{ user_info.get('last_name', '') }}</p>
+        <p><strong>User ID:</strong> {{ user_info.get('id', 'N/A') }}</p>
+        {% else %}
+        <p>Could not retrieve user information.</p>
+        {% endif %}
+    </div>
+
+    <hr>
+
+    <h2>Create a New Zoom Meeting</h2>
+
+    {% if access_token %}
+    <form action="/create_meeting" method="post">
+        <!--
+                SECURITY WARNING: Sending access tokens in hidden form fields is NOT recommended
+                for production environments due to security risks (e.g., XSS can steal it).
+                Use server-side sessions or more secure token handling methods instead.
+                This is done here for simplicity in the example.
+            -->
+        <input type="hidden" name="access_token" value="{{ access_token }}">
+
+        <div>
+            <label for="topic">Meeting Topic:</label>
+            <input type="text" id="topic" name="topic" required placeholder="My Team Meeting">
+        </div>
+        <div>
+            <label for="start_time">Start Time (Your Local Time):</label>
+            <!-- datetime-local provides a user-friendly picker -->
+            <input type="datetime-local" id="start_time" name="start_time" required>
+        </div>
+        <div>
+            <label for="duration">Duration (minutes):</label>
+            <input type="number" id="duration" name="duration" required min="1" value="60">
+        </div>
+
+        <button type="submit">Create Meeting</button>
+    </form>
+    {% else %}
+    <p class="error">Error: Access token not found. Cannot create meeting.</p>
+    {% endif %}
+
+    <p><a href="/">Go Back</a></p>
+
 </body>
 
 </html>

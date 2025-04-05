@@ -5,11 +5,15 @@ from fastapi.security import OAuth2AuthorizationCodeBearer
 from urllib.parse import urlencode
 import httpx
 import os
+import json
 from typing import Optional
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone # Import datetime
 
 load_dotenv()
+
+# del os.environ["ZOOM_CLIENT_ID"]
+# del os.environ["ZOOM_CLIENT_SECRET"]
 
 # --- Zoom Configuration ---
 ZOOM_CLIENT_ID = os.environ.get("ZOOM_CLIENT_ID")
@@ -25,7 +29,8 @@ ZOOM_WEBHOOK_VERIFICATION_TOKEN = os.environ.get("ZOOM_WEBHOOK_VERIFICATION_TOKE
 ZOOM_POLL_CREATE_URL = "https://api.zoom.us/v2/meetings/" # API endpoint for creating polls
 ZOOM_POLL_REPORT_URL="https://api.zoom.us/v2/report/meetings/"
 
-print(f"ZOOM_REDIRECT_URI = {ZOOM_REDIRECT_URI}")
+# print(os.environ)
+print(f"ZOOM_CLIENT_ID = {ZOOM_CLIENT_ID}")
 
 # --- FastAPI Setup ---
 app = FastAPI()
@@ -49,14 +54,14 @@ async def get_zoom_user_info(access_token: str):
 
 async def get_poll_results(access_token: str, meeting_id: str):
     """Fetches user information from Zoom API."""
-    headers = {"Authorization": f"Bearer {access_token}"}
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
     body = {
         "title": "Class Engagement Quiz - Lecture 1",
-            "anonymous": "false",
+            "anonymous": False,
             "questions": [
                 {
                 "name": "Which topic was covered today?",
-                "type": "single",  # single | multiple | matching
+                "type": "single",
                 "answers": ["LLMs", "CNNs", "GANs", "RNNs"]
                 },
                 {
@@ -107,13 +112,9 @@ async def create_zoom_meeting(access_token: str, topic: str, start_time_str: str
     }
     # Convert local datetime string from form to UTC ISO format for Zoom API
     try:
-        # Assuming the input string is in 'YYYY-MM-DDTHH:MM' format (from datetime-local input)
         naive_dt = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M")
-        # Assume the naive datetime is in the system's local timezone
         local_dt = naive_dt.astimezone()
-        # Convert to UTC
         utc_dt = local_dt.astimezone(timezone.utc)
-        # Format for Zoom API (YYYY-MM-DDTHH:MM:SSZ)
         start_time_iso = utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     except ValueError:
@@ -186,10 +187,7 @@ async def zoom_callback(code: str, request: Request):
     token_params = {
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": ZOOM_REDIRECT_URI,
-        # Zoom requires Basic Auth for token exchange
-        # "client_id": ZOOM_CLIENT_ID, # Included in Basic Auth header
-        # "client_secret": ZOOM_CLIENT_SECRET # Included in Basic Auth header
+        "redirect_uri": ZOOM_REDIRECT_URI
     }
 
     # Basic Auth Header: base64encode(client_id:client_secret)
@@ -259,7 +257,9 @@ async def handle_create_meeting(
         # Display meeting details on a confirmation page
         return templates.TemplateResponse("meeting_created.html", {
             "request": request,
-            "meeting": meeting_details
+            "meeting": meeting_details,
+            "request": request,
+            "access_token": access_token
         })
 
     except HTTPException as e:
@@ -284,35 +284,74 @@ async def zoom_webhook(request: Request):
 
     try:
         data = await request.json()
-        print(f"Received webhook data: {data}")
-        event_type = data.get("event")
-        print(f"Event Type: {event_type}")
-        if event_type == "meeting.started":
-            meeting_id = data["payload"]["object"]["id"]
-            topic = data["payload"]["object"]["topic"]
-            start_time = data["payload"]["object"]["start_time"]
-            print(f"Meeting Started: ID={meeting_id}, Topic='{topic}', Start Time={start_time}")
+        if data["payload"]["object"]["participant"]["email"] == "tmihir27+asu@gmail.com":
+            print(f"Received webhook data: {data}")
+            event_type = data.get("event")
+            print(f"Event Type: {event_type}")
+            if event_type == "meeting.started":
+                meeting_id = data["payload"]["object"]["id"]
+                topic = data["payload"]["object"]["topic"]
+                start_time = data["payload"]["object"]["start_time"]
+                print(f"Meeting Started: ID={meeting_id}, Topic='{topic}', Start Time={start_time}")
 
-        elif event_type == "meeting.participant_joined":
-            participant_name = data["payload"]["object"]["participant"]["user_name"]
-            meeting_id = data["payload"]["object"]["id"]
-            print(f"Participant Joined: Name={participant_name}, Meeting ID={meeting_id}")
+            elif event_type == "meeting.participant_joined":
+                participant_name = data["payload"]["object"]["participant"]["user_name"]
+                meeting_id = data["payload"]["object"]["id"]
+                print(f"Participant Joined: Name={participant_name}, Meeting ID={meeting_id}")
 
-        elif data.get("event") == "app.installed":
-            account_id = data["payload"]["account_id"]
-            print(f"App installed in account {account_id}")
-            return {"plainToken": ZOOM_WEBHOOK_VERIFICATION_TOKEN}
+            elif data.get("event") == "app.installed":
+                account_id = data["payload"]["account_id"]
+                print(f"App installed in account {account_id}")
+                return {"plainToken": ZOOM_WEBHOOK_VERIFICATION_TOKEN}
 
-        elif data.get("event") == "app.uninstalled":
-            account_id = data["payload"]["account_id"]
-            print(f"App uninstalled from account {account_id}")
+            elif data.get("event") == "app.uninstalled":
+                account_id = data["payload"]["account_id"]
+                print(f"App uninstalled from account {account_id}")
 
-        else:
-            print(f"Received unknown event: {event_type}")
-            print(f"Webhook Data: {data}")
+            else:
+                print(f"Received unknown event: {event_type}")
+                print(f"Webhook Data: {data}")
 
         return {"status": "success"}
 
     except Exception as e:
         print(f"Error processing webhook: {e}")
         raise HTTPException(status_code=500, detail="Error processing webhook")
+    
+
+@app.get("/poll_results", response_class=HTMLResponse)
+async def poll_results(request: Request, access_token: str = Form(...), meeting_id: str = Form(...)):
+    """Receives form data and calls the function to create a meeting."""
+    # Basic input validation (more can be added)
+    if not access_token:
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token.")
+    if not meeting_id:
+         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting ID cannot be empty.")
+    
+    poll_details = await get_poll_info(
+        access_token=access_token,
+        meeting_id=meeting_id
+    )
+
+    print(f"Poll Details: {poll_details}") # Debugging
+
+
+@app.post("/create_poll", response_class=HTMLResponse)
+async def handle_create_poll(
+    request: Request,
+    access_token: str = Form(...), # Get token from hidden form field
+    meeting_id: str = Form(...),
+):
+    """Receives form data and calls the function to create a meeting."""
+    # Basic input validation (more can be added)
+    if not access_token:
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token.")
+    if not meeting_id:
+         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting ID cannot be empty.")
+    
+    poll_details = await get_poll_results(
+        access_token=access_token,
+        meeting_id=meeting_id
+    )
+
+    print(f"Poll Details: {poll_details}")

@@ -48,6 +48,14 @@
         <p>Error: Meeting details not available.</p>
         {% endif %}
     </div>
+    <div class="poll">
+        <form action="/create_poll" method="post">
+            <input type="hidden" name="access_token" value="{{ access_token }}">
+
+            <input type="hidden" name="meeting_id" value="{{ meeting.get('id', 'N/A') }}">
+            <button type="submit">Create Poll</button>
+        </form>
+    </div>
 
     <p><a href="/">Go Back Home</a></p>
 

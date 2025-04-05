@@ -9,6 +9,8 @@ import json
 from typing import Optional
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone # Import datetime
+from parser import process_webhook
+
 
 load_dotenv()
 
@@ -52,56 +54,76 @@ async def get_zoom_user_info(access_token: str):
             print(f"Request error fetching user info: {e}")
             return None
 
-async def get_poll_results(access_token: str, meeting_id: str):
-    """Fetches user information from Zoom API."""
-    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-    body = {
-        "title": "Class Engagement Quiz - Lecture 1",
-            "anonymous": False,
-            "questions": [
-                {
-                "name": "Which topic was covered today?",
-                "type": "single",
-                "answers": ["LLMs", "CNNs", "GANs", "RNNs"]
-                },
-                {
-                "name": "Rate your understanding",
-                "type": "rating",
-                "answer_min_character": "Poor",
-                "answer_max_character": "Excellent"
-                }
-            ]
-        }
+# async def get_poll_results(access_token: str, meeting_id: str):
+#     """Fetches user information from Zoom API."""
+#     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+#     body = {
+#         "id": "QalIoKWLTJehBJ8e1xRrbQ",
+#         "status": "notstart",
+#         "anonymous": True,
+#         "poll_type": 2,
+#         "questions": [
+#             {
+#             "answer_max_character": 200,
+#             "answer_min_character": 1,
+#             "answer_required": False,
+#             "answers": [
+#                 "Extremely useful"
+#                 ],
+#             "case_sensitive": False,
+#             "name": "How useful was this meeting?",
+#             "prompts": [
+#                 {
+#                 "prompt_question": "How are you?",
+#                 "prompt_right_answers": [
+#                     "Good"
+#                     ]
+#                 }
+#             ],
+#             "rating_max_label": "Extremely Likely",
+#             "rating_max_value": 4,
+#             "rating_min_label": "Not likely",
+#             "rating_min_value": 0,
+#             "right_answers": [
+#                 "Good"
+#             ],
+#             "show_as_dropdown": False,
+#             "type": "single"
+#             }
+#         ],
+#         "title": "Learn something new"
+#     }
 
-    async with httpx.AsyncClient() as client:
-        try:
-            url = ZOOM_POLL_CREATE_URL + meeting_id + "/polls"
-            response = await client.post(url, headers=headers, json=body)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            print(f"Error fetching user info: {e.response.text}") # Log error details
-            return None
-        except httpx.RequestError as e:
+#     async with httpx.AsyncClient() as client:
+#         try:
+#             url = ZOOM_POLL_CREATE_URL + meeting_id + "/polls"
+#             print(url)
+#             response = await client.post(url, headers=headers, json=body)
+#             response.raise_for_status()
+#             return response.json()
+#         except httpx.HTTPStatusError as e:
+#             print(f"Error fetching user info: {e.response.text}") # Log error details
+#             return None
+#         except httpx.RequestError as e:
             print(f"Request error fetching user info: {e}")
             return None
 
 
-async def get_poll_info(access_token: str, meeting_id: str):
-    """Fetches user information from Zoom API."""
-    headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient() as client:
-        try:
-            url = ZOOM_POLL_REPORT_URL + meeting_id + "/polls"
-            response = await client.get(ZOOM_USER_INFO_URL, headers=headers)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            print(f"Error fetching user info: {e.response.text}") # Log error details
-            return None
-        except httpx.RequestError as e:
-            print(f"Request error fetching user info: {e}")
-            return None
+# async def get_poll_info(access_token: str, meeting_id: str):
+#     """Fetches user information from Zoom API."""
+#     headers = {"Authorization": f"Bearer {access_token}"}
+#     async with httpx.AsyncClient() as client:
+#         try:
+#             url = ZOOM_POLL_REPORT_URL + meeting_id + "/polls"
+#             response = await client.get(url, headers=headers)
+#             response.raise_for_status()
+#             return response.json()
+#         except httpx.HTTPStatusError as e:
+#             print(f"Error fetching user info: {e.response.text}") # Log error details
+#             return None
+#         except httpx.RequestError as e:
+#             print(f"Request error fetching user info: {e}")
+#             return None
 
 
 async def create_zoom_meeting(access_token: str, topic: str, start_time_str: str, duration_min: int):
@@ -281,36 +303,46 @@ async def zoom_webhook(request: Request):
 
     if not ZOOM_WEBHOOK_SECRET_TOKEN:
         raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_SECRET_TOKEN not configured")
+    
+    # print(request.headers)
+    if ZOOM_WEBHOOK_VERIFICATION_TOKEN != request.headers.get("authorization"):
+        return {"status": "error", "message": "Invalid secret token"}
 
     try:
         data = await request.json()
-        if data["payload"]["object"]["participant"]["email"] == "tmihir27+asu@gmail.com":
-            print(f"Received webhook data: {data}")
-            event_type = data.get("event")
-            print(f"Event Type: {event_type}")
-            if event_type == "meeting.started":
-                meeting_id = data["payload"]["object"]["id"]
-                topic = data["payload"]["object"]["topic"]
-                start_time = data["payload"]["object"]["start_time"]
-                print(f"Meeting Started: ID={meeting_id}, Topic='{topic}', Start Time={start_time}")
+        # if data["payload"]["object"]["participant"]["email"] == "tmihir27+asu@gmail.com":
+        print(f"Received webhook data: {data}")
+        event_type = data.get("event")
+        print(f"Event Type: {event_type}")
+        
+        # if data['payload']['object']['participant']['email'] != "tmihir27+asu@gmail.com":
+        if request.headers.get("x-webhook") == "zoomba":
+            print("SENDING TO PARSER")
+            process_webhook(data)
+        
+        # if event_type == "meeting.started":
+        #     meeting_id = data["payload"]["object"]["id"]
+        #     topic = data["payload"]["object"]["topic"]
+        #     start_time = data["payload"]["object"]["start_time"]
+        #     print(f"Meeting Started: ID={meeting_id}, Topic='{topic}', Start Time={start_time}")
 
-            elif event_type == "meeting.participant_joined":
-                participant_name = data["payload"]["object"]["participant"]["user_name"]
-                meeting_id = data["payload"]["object"]["id"]
-                print(f"Participant Joined: Name={participant_name}, Meeting ID={meeting_id}")
+        # elif event_type == "meeting.participant_joined":
+        #     participant_name = data["payload"]["object"]["participant"]["user_name"]
+        #     meeting_id = data["payload"]["object"]["id"]
+        #     print(f"Participant Joined: Name={participant_name}, Meeting ID={meeting_id}")
 
-            elif data.get("event") == "app.installed":
-                account_id = data["payload"]["account_id"]
-                print(f"App installed in account {account_id}")
-                return {"plainToken": ZOOM_WEBHOOK_VERIFICATION_TOKEN}
+        # elif data.get("event") == "app.installed":
+        #     account_id = data["payload"]["account_id"]
+        #     print(f"App installed in account {account_id}")
+        #     return {"plainToken": ZOOM_WEBHOOK_VERIFICATION_TOKEN}
 
-            elif data.get("event") == "app.uninstalled":
-                account_id = data["payload"]["account_id"]
-                print(f"App uninstalled from account {account_id}")
+        # elif data.get("event") == "app.uninstalled":
+        #     account_id = data["payload"]["account_id"]
+        #     print(f"App uninstalled from account {account_id}")
 
-            else:
-                print(f"Received unknown event: {event_type}")
-                print(f"Webhook Data: {data}")
+        # else:
+        #     print(f"Received unknown event: {event_type}")
+        #     print(f"Webhook Data: {data}")
 
         return {"status": "success"}
 
@@ -318,40 +350,68 @@ async def zoom_webhook(request: Request):
         print(f"Error processing webhook: {e}")
         raise HTTPException(status_code=500, detail="Error processing webhook")
     
+# @app.post("/qss_webhook")
+# async def zoom_webhook(request: Request):
+#     """
+#     Handles Zoom webhooks for meeting.started and meeting.participant_joined events.
+#     """
+#     if not ZOOM_WEBHOOK_VERIFICATION_TOKEN:
+#         raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_VERIFICATION_TOKEN not configured")
 
-@app.get("/poll_results", response_class=HTMLResponse)
-async def poll_results(request: Request, access_token: str = Form(...), meeting_id: str = Form(...)):
-    """Receives form data and calls the function to create a meeting."""
-    # Basic input validation (more can be added)
-    if not access_token:
-         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token.")
-    if not meeting_id:
-         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting ID cannot be empty.")
+#     if not ZOOM_WEBHOOK_SECRET_TOKEN:
+#         raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_SECRET_TOKEN not configured")
+
+#     data = await request.json()
+
     
-    poll_details = await get_poll_info(
-        access_token=access_token,
-        meeting_id=meeting_id
-    )
+# @app.post("/chat_webhook")
+# async def zoom_webhook(request: Request):
+#     """
+#     Handles Zoom webhooks for meeting.started and meeting.participant_joined events.
+#     """
+#     if not ZOOM_WEBHOOK_VERIFICATION_TOKEN:
+#         raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_VERIFICATION_TOKEN not configured")
 
-    print(f"Poll Details: {poll_details}") # Debugging
+#     if not ZOOM_WEBHOOK_SECRET_TOKEN:
+#         raise HTTPException(status_code=500, detail="ZOOM_WEBHOOK_SECRET_TOKEN not configured")
 
-
-@app.post("/create_poll", response_class=HTMLResponse)
-async def handle_create_poll(
-    request: Request,
-    access_token: str = Form(...), # Get token from hidden form field
-    meeting_id: str = Form(...),
-):
-    """Receives form data and calls the function to create a meeting."""
-    # Basic input validation (more can be added)
-    if not access_token:
-         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token.")
-    if not meeting_id:
-         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting ID cannot be empty.")
+#     data = await request.json()
+#     print(f"Chat webhook data: {data}")
     
-    poll_details = await get_poll_results(
-        access_token=access_token,
-        meeting_id=meeting_id
-    )
 
-    print(f"Poll Details: {poll_details}")
+# @app.get("/poll_results", response_class=HTMLResponse)
+# async def poll_results(request: Request, access_token: str = Form(...), meeting_id: str = Form(...)):
+#     """Receives form data and calls the function to create a meeting."""
+#     # Basic input validation (more can be added)
+#     if not access_token:
+#          raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token.")
+#     if not meeting_id:
+#          raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting ID cannot be empty.")
+    
+#     poll_details = await get_poll_info(
+#         access_token=access_token,
+#         meeting_id=meeting_id
+#     )
+
+#     print(f"Poll Details: {poll_details}") # Debugging
+
+
+# @app.post("/create_poll", response_class=HTMLResponse)
+# async def handle_create_poll(
+#     request: Request,
+#     access_token: str = Form(...), # Get token from hidden form field
+#     meeting_id: str = Form(...),
+# ):
+#     """Receives form data and calls the function to create a meeting."""
+#     # Basic input validation (more can be added)
+#     if not access_token:
+#          raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token.")
+#     if not meeting_id:
+#          raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting ID cannot be empty.")
+    
+#     poll_details = await get_poll_results(
+#         access_token=access_token,
+#         meeting_id=meeting_id
+#     )
+
+#     print(f"Poll Details: {poll_details}")
